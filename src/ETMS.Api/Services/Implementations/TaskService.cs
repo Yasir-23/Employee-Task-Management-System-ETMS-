@@ -1,4 +1,6 @@
+using System.Globalization;
 using ETMS.Api.Common.Exceptions;
+using ETMS.Api.Common.Extensions;
 using ETMS.Api.Common.Mappings;
 using ETMS.Api.Data;
 using ETMS.Api.DTOs.Requests;
@@ -16,10 +18,14 @@ public class TaskService : ITaskService
     public const int MaxActiveTasksPerEmployee = 5;
 
     private readonly AppDbContext _db;
+    private readonly IEmailService _emailService;
+    private readonly ILogger<TaskService> _logger;
 
-    public TaskService(AppDbContext db)
+    public TaskService(AppDbContext db, IEmailService emailService, ILogger<TaskService> logger)
     {
         _db = db;
+        _emailService = emailService;
+        _logger = logger;
     }
 
     public async Task<TaskResponseDto> CreateTaskAsync(Guid creatorUserId, CreateTaskRequest request, CancellationToken cancellationToken = default)
@@ -35,7 +41,7 @@ public class TaskService : ITaskService
 
         await using var transaction = await BeginAssignmentTransactionAsync(assigneeId, cancellationToken);
 
-        await EnsureDirectReportAsync(creatorUserId, assigneeId, cancellationToken);
+        var assignee = await EnsureDirectReportAsync(creatorUserId, assigneeId, cancellationToken);
         await EnsureActiveTaskCapacityAsync(assigneeId, cancellationToken);
 
         var now = DateTime.UtcNow;
@@ -57,12 +63,14 @@ public class TaskService : ITaskService
         await _db.SaveChangesAsync(cancellationToken);
         await CommitAsync(transaction, cancellationToken);
 
-        return await GetProjectedAsync(task.Id, cancellationToken);
+        var created = await GetProjectedAsync(task.Id, cancellationToken);
+        await NotifyAssigneeAsync(assignee, created, isReassignment: false, cancellationToken);
+        return created;
     }
 
     public async Task<PagedResult<TaskResponseDto>> GetTasksAsync(Guid currentUserId, string role, TaskFilterParams filter, CancellationToken cancellationToken = default)
     {
-        var query = ScopeToUser(_db.Tasks.AsNoTracking(), currentUserId, role);
+        var query = _db.Tasks.AsNoTracking().ScopeToUser(currentUserId, role);
 
         if (filter.Status is { } status)
         {
@@ -97,7 +105,8 @@ public class TaskService : ITaskService
     public async Task<TaskDetailsDto> GetTaskByIdAsync(Guid currentUserId, string role, Guid taskId, CancellationToken cancellationToken = default)
     {
         // Out-of-scope tasks are reported as 404 so their existence is not disclosed.
-        var task = await ScopeToUser(_db.Tasks.AsNoTracking(), currentUserId, role)
+        var task = await _db.Tasks.AsNoTracking()
+            .ScopeToUser(currentUserId, role)
             .Where(t => t.Id == taskId)
             .Select(TaskMappings.ToDtoExpression)
             .SingleOrDefaultAsync(cancellationToken)
@@ -233,7 +242,7 @@ public class TaskService : ITaskService
             throw new ConflictException("Completed tasks are immutable and cannot be reassigned.");
         }
 
-        await EnsureDirectReportAsync(currentManagerId, newAssigneeId, cancellationToken);
+        var newAssignee = await EnsureDirectReportAsync(currentManagerId, newAssigneeId, cancellationToken);
 
         if (task.AssigneeId == newAssigneeId)
         {
@@ -250,25 +259,32 @@ public class TaskService : ITaskService
         await _db.SaveChangesAsync(cancellationToken);
         await CommitAsync(transaction, cancellationToken);
 
-        return await GetProjectedAsync(task.Id, cancellationToken);
+        var reassigned = await GetProjectedAsync(task.Id, cancellationToken);
+        await NotifyAssigneeAsync(newAssignee, reassigned, isReassignment: true, cancellationToken);
+        return reassigned;
     }
 
-    private IQueryable<TaskItem> ScopeToUser(IQueryable<TaskItem> query, Guid currentUserId, string role)
+    /// <summary>
+    /// FR-NOTIF-01: emails the assignee once the assignment has been committed. A delivery failure is
+    /// logged rather than surfaced, because the task change itself has already succeeded.
+    /// </summary>
+    private async Task NotifyAssigneeAsync(AssigneeContact assignee, TaskResponseDto task, bool isReassignment, CancellationToken cancellationToken)
     {
-        if (!Enum.TryParse<Role>(role, ignoreCase: false, out var parsedRole))
-        {
-            throw new ForbiddenException("Unrecognized role.");
-        }
+        var subject = isReassignment
+            ? $"Task reassigned to you: \"{task.Title}\""
+            : $"New task assigned: \"{task.Title}\"";
+        var body =
+            $"Hi {assignee.FullName}, {task.CreatorName} has assigned you the task \"{task.Title}\". " +
+            $"Priority: {task.Priority}. Due: {task.DueDateUtc.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture)}.";
 
-        return parsedRole switch
+        try
         {
-            Role.Admin => query,
-            Role.Manager => query.Where(t =>
-                t.CreatedByUserId == currentUserId
-                || (t.Assignee != null && t.Assignee.ManagerId == currentUserId)),
-            Role.Employee => query.Where(t => t.AssigneeId == currentUserId),
-            _ => throw new ForbiddenException("Unrecognized role.")
-        };
+            await _emailService.SendEmailAsync(assignee.Email, subject, body, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Failed to send assignment email for task {TaskId} to {Email}.", task.Id, assignee.Email);
+        }
     }
 
     // BR-03: due dates must lie in the future relative to server UTC time.
@@ -290,17 +306,16 @@ public class TaskService : ITaskService
     }
 
     // BR-05: managers may only assign work to employees whose ManagerId is the manager.
-    private async Task EnsureDirectReportAsync(Guid managerId, Guid assigneeId, CancellationToken cancellationToken)
+    private async Task<AssigneeContact> EnsureDirectReportAsync(Guid managerId, Guid assigneeId, CancellationToken cancellationToken)
     {
-        var isDirectReport = await _db.Users.AnyAsync(
-            u => u.Id == assigneeId && u.Role == Role.Employee && u.ManagerId == managerId,
-            cancellationToken);
-
-        if (!isDirectReport)
-        {
-            throw new ForbiddenException("Tasks can only be assigned to employees who report directly to you.");
-        }
+        return await _db.Users
+            .Where(u => u.Id == assigneeId && u.Role == Role.Employee && u.ManagerId == managerId)
+            .Select(u => new AssigneeContact(u.Email, u.FullName))
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw new ForbiddenException("Tasks can only be assigned to employees who report directly to you.");
     }
+
+    private sealed record AssigneeContact(string Email, string FullName);
 
     // BR-01: an employee may hold at most five active (non-Completed) tasks.
     private async Task EnsureActiveTaskCapacityAsync(Guid assigneeId, CancellationToken cancellationToken)

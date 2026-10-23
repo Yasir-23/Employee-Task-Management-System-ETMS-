@@ -20,6 +20,7 @@ public class TasksController : ControllerBase
         _taskService = taskService;
     }
 
+    /// <summary>Creates a task for one of the manager's direct reports (enforces BR-01, BR-03, BR-05).</summary>
     [HttpPost]
     [Authorize(Roles = "Manager")]
     [ProducesResponseType(typeof(TaskResponseDto), StatusCodes.Status201Created)]
@@ -32,6 +33,7 @@ public class TasksController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = task.Id }, task);
     }
 
+    /// <summary>Lists tasks visible to the caller: all (Admin), created or team tasks (Manager), own tasks (Employee).</summary>
     [HttpGet]
     [ProducesResponseType(typeof(PagedResult<TaskResponseDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
@@ -40,6 +42,7 @@ public class TasksController : ControllerBase
         return Ok(await _taskService.GetTasksAsync(User.GetUserId(), User.GetRole(), filter, cancellationToken));
     }
 
+    /// <summary>Returns a task with its comments and audit history. Tasks outside the caller's scope return 404.</summary>
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(TaskDetailsDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
@@ -48,6 +51,7 @@ public class TasksController : ControllerBase
         return Ok(await _taskService.GetTaskByIdAsync(User.GetUserId(), User.GetRole(), id, cancellationToken));
     }
 
+    /// <summary>Adds a comment. Allowed for the assignee, the creator, or an Admin.</summary>
     [HttpPost("{id:guid}/comments")]
     [ProducesResponseType(typeof(CommentResponseDto), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
@@ -59,6 +63,7 @@ public class TasksController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id }, comment);
     }
 
+    /// <summary>Advances the task to the next lifecycle status. Assignee only (BR-02, BR-04).</summary>
     [HttpPatch("{id:guid}/status")]
     [Authorize(Roles = "Employee")]
     [ProducesResponseType(typeof(TaskResponseDto), StatusCodes.Status200OK)]
@@ -71,6 +76,7 @@ public class TasksController : ControllerBase
         return Ok(await _taskService.UpdateTaskStatusAsync(User.GetUserId(), id, request, cancellationToken));
     }
 
+    /// <summary>Reassigns an active task to another direct report (BR-01, BR-02, BR-05).</summary>
     [HttpPut("{id:guid}/reassign")]
     [Authorize(Roles = "Manager")]
     [ProducesResponseType(typeof(TaskResponseDto), StatusCodes.Status200OK)]

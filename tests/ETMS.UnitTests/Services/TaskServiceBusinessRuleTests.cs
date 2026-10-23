@@ -4,6 +4,7 @@ using ETMS.Api.Models.Enums;
 using ETMS.Api.Services.Implementations;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Moq;
 
 namespace ETMS.UnitTests.Services;
 
@@ -268,6 +269,77 @@ public sealed class TaskServiceBusinessRuleTests : IDisposable
         Assert.Equal(StatusCodes.Status400BadRequest, ex.StatusCode);
         var stored = await _ctx.Db.Tasks.AsNoTracking().SingleAsync(t => t.Id == task.Id);
         Assert.Equal(from, stored.Status);
+    }
+
+    // ---------------------------------------------------------------------
+    // FR-NOTIF-01: assignment emails
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public async Task CreateTask_EmailsAssigneeWithTitlePriorityAndDueDate()
+    {
+        var dueDate = new DateTime(2031, 3, 14, 9, 30, 0, DateTimeKind.Utc);
+        var request = TaskServiceTestContext.CreateRequest(_ctx.Employee.Id, dueDate);
+
+        await _ctx.Service.CreateTaskAsync(_ctx.Manager.Id, request);
+
+        _ctx.Email.Verify(e => e.SendEmailAsync(
+            _ctx.Employee.Email,
+            It.Is<string>(s => s.Contains("New task assigned") && s.Contains(request.Title)),
+            It.Is<string>(b => b.Contains(request.Title) && b.Contains("High") && b.Contains("2031-03-14 09:30 UTC")),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _ctx.Email.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Reassign_EmailsNewAssigneeOnly()
+    {
+        var task = _ctx.AddTask(_ctx.Employee.Id);
+
+        await _ctx.Service.ReassignTaskAsync(_ctx.Manager.Id, task.Id, new ReassignTaskRequest { NewAssigneeId = _ctx.Teammate.Id });
+
+        _ctx.Email.Verify(e => e.SendEmailAsync(
+            _ctx.Teammate.Email,
+            It.Is<string>(s => s.Contains("reassigned") && s.Contains(task.Title)),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _ctx.Email.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task RejectedAssignment_SendsNoEmail()
+    {
+        _ctx.AddTasks(_ctx.Employee.Id, 5);
+        var task = _ctx.AddTask(_ctx.Teammate.Id);
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            _ctx.Service.CreateTaskAsync(_ctx.Manager.Id, TaskServiceTestContext.CreateRequest(_ctx.Employee.Id)));
+        await Assert.ThrowsAsync<ForbiddenException>(() =>
+            _ctx.Service.ReassignTaskAsync(_ctx.Manager.Id, task.Id, new ReassignTaskRequest { NewAssigneeId = _ctx.ForeignEmployee.Id }));
+
+        _ctx.Email.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Reassign_ToCurrentAssignee_SendsNoEmail()
+    {
+        var task = _ctx.AddTask(_ctx.Employee.Id);
+
+        await _ctx.Service.ReassignTaskAsync(_ctx.Manager.Id, task.Id, new ReassignTaskRequest { NewAssigneeId = _ctx.Employee.Id });
+
+        _ctx.Email.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task CreateTask_WhenEmailDeliveryFails_StillCreatesTask()
+    {
+        _ctx.Email
+            .Setup(e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("SMTP unavailable"));
+
+        var result = await _ctx.Service.CreateTaskAsync(_ctx.Manager.Id, TaskServiceTestContext.CreateRequest(_ctx.Employee.Id));
+
+        Assert.True(await _ctx.Db.Tasks.AnyAsync(t => t.Id == result.Id));
     }
 
     // ---------------------------------------------------------------------

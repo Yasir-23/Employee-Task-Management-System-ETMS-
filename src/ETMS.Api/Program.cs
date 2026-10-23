@@ -65,6 +65,7 @@ builder.Services.AddScoped<IEmployeeService, EmployeeService>();
 builder.Services.AddScoped<ITaskService, TaskService>();
 builder.Services.AddScoped<IEmailService, LoggingEmailService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddScoped<IReportService, ReportService>();
 
 // Background notifications (SDD §6)
 builder.Services.AddOptions<NotificationWorkerSettings>()
@@ -81,7 +82,19 @@ builder.Services
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
-    options.SwaggerDoc("v1", new OpenApiInfo { Title = "ETMS API", Version = "v1" });
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "Employee Task Management System API",
+        Version = "v1",
+        Description = "Task assignment, lifecycle tracking, auditing and reporting for ETMS. " +
+            "Authenticate via POST /api/auth/login, then use Authorize with the returned access token."
+    });
+
+    var xmlDocPath = Path.Combine(AppContext.BaseDirectory, $"{typeof(Program).Assembly.GetName().Name}.xml");
+    if (File.Exists(xmlDocPath))
+    {
+        options.IncludeXmlComments(xmlDocPath);
+    }
 
     options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
@@ -137,6 +150,6 @@ app.MapControllers();
 app.MapGet("/health", () => Results.Ok(new { status = "Healthy", database = "PostgreSQL" }))
     .WithName("HealthCheck");
 
-await DbInitializer.SeedAsync(app.Services);
+await DbInitializer.SeedAsync(app.Services, includeDemoUsers: app.Environment.IsDevelopment());
 
 app.Run();

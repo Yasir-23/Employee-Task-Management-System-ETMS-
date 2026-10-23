@@ -18,6 +18,7 @@ public class DepartmentsController : ControllerBase
         _departmentService = departmentService;
     }
 
+    /// <summary>Creates a department. Admin only.</summary>
     [HttpPost]
     [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(DepartmentDto), StatusCodes.Status201Created)]
@@ -29,6 +30,7 @@ public class DepartmentsController : ControllerBase
         return StatusCode(StatusCodes.Status201Created, department);
     }
 
+    /// <summary>Lists all departments ordered by name.</summary>
     [HttpGet]
     [Authorize]
     [ProducesResponseType(typeof(IReadOnlyList<DepartmentDto>), StatusCodes.Status200OK)]

@@ -18,6 +18,7 @@ public class EmployeesController : ControllerBase
         _employeeService = employeeService;
     }
 
+    /// <summary>Creates a user. Employees must report to an existing Manager (FR-ORG-03).</summary>
     [HttpPost]
     [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(UserDto), StatusCodes.Status201Created)]
@@ -28,6 +29,7 @@ public class EmployeesController : ControllerBase
         return StatusCode(StatusCodes.Status201Created, employee);
     }
 
+    /// <summary>Searches users by name/email with department and role filters; paginated (max page size 100).</summary>
     [HttpGet]
     [Authorize(Roles = "Admin,Manager")]
     [ProducesResponseType(typeof(PagedResult<EmployeeListDto>), StatusCodes.Status200OK)]

@@ -90,6 +90,23 @@ public class AuthService : IAuthService
         return response;
     }
 
+    public async Task RevokeTokenAsync(string refreshToken, CancellationToken cancellationToken = default)
+    {
+        var tokenHash = _tokenService.HashToken(refreshToken);
+
+        var stored = await _db.RefreshTokens.SingleOrDefaultAsync(t => t.TokenHash == tokenHash, cancellationToken)
+            ?? throw new BadRequestException("The refresh token is invalid.");
+
+        // Revoking twice (e.g. a repeated logout) is a no-op rather than an error.
+        if (stored.IsRevoked)
+        {
+            return;
+        }
+
+        stored.IsRevoked = true;
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
     private async Task<AuthResponse> IssueTokensAsync(User user, CancellationToken cancellationToken)
     {
         var (accessToken, expiresAtUtc) = _tokenService.GenerateAccessToken(user);

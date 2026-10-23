@@ -1,5 +1,5 @@
 services:
-  postgres:
+  db:
     image: postgres:16
     container_name: etms_postgres
     restart: unless-stopped
@@ -16,6 +16,23 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: etms_api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Development enables Swagger and seeds the demo Manager/Employee accounts.
+      # Use Production (and real secrets via JwtSettings__Secret etc.) outside local use.
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__DefaultConnection: "Host=db;Port=5432;Database=etms_db;Username=postgres;Password=postgrespassword"
+    ports:
+      - "5000:8080"
 
 volumes:
   etms_postgres_data:
