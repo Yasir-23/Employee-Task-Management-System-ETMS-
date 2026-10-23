@@ -1,0 +1,84 @@
+# ------------------------------------------------------------
+# .NET 8 / C# build output
+# ------------------------------------------------------------
+**/bin/
+**/obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa]rm/
+[Aa]rm64/
+[Ll]og/
+[Ll]ogs/
+artifacts/
+publish/
+*.dll
+*.exe
+*.pdb
+*.cache
+*.nupkg
+*.snupkg
+
+# NuGet
+**/packages/*
+!**/packages/build/
+project.lock.json
+project.fragment.lock.json
+.nuget/
+
+# Test results & coverage
+[Tt]est[Rr]esult*/
+*.trx
+coverage/
+coverage*.json
+coverage*.xml
+coverage*.info
+*.coverage
+*.coveragexml
+TestResults/
+
+# ------------------------------------------------------------
+# Visual Studio / Rider / VS Code
+# ------------------------------------------------------------
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+.vscode/
+.idea/
+*.sln.iml
+*.swp
+*~
+
+# ------------------------------------------------------------
+# Docker / local data
+# ------------------------------------------------------------
+etms_postgres_data/
+postgres_data/
+pgdata/
+docker-compose.override.yml
+
+# ------------------------------------------------------------
+# Environment & secrets
+# ------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+appsettings.*.local.json
+secrets.json
+
+# ------------------------------------------------------------
+# OS files
+# ------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/

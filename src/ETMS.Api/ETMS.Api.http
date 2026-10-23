@@ -1,0 +1,6 @@
+@ETMS.Api_HostAddress = http://localhost:5109
+
+GET {{ETMS.Api_HostAddress}}/health
+Accept: application/json
+
+###
