@@ -77,7 +77,7 @@ public class EmployeeService : IEmployeeService
         return user.ToDto();
     }
 
-    public async Task<PagedResult<UserDto>> GetEmployeesAsync(EmployeeFilterParams filter, CancellationToken cancellationToken = default)
+    public async Task<PagedResult<EmployeeListDto>> GetEmployeesAsync(EmployeeFilterParams filter, CancellationToken cancellationToken = default)
     {
         var query = _db.Users.AsNoTracking();
 
@@ -105,10 +105,19 @@ public class EmployeeService : IEmployeeService
             .ThenBy(u => u.Id)
             .Skip((filter.PageNumber - 1) * filter.PageSize)
             .Take(filter.PageSize)
-            .Select(UserMappings.ToDtoExpression)
+            .Select(u => new EmployeeListDto
+            {
+                Id = u.Id,
+                FullName = u.FullName,
+                Email = u.Email,
+                Role = u.Role,
+                Department = u.Department != null ? new DepartmentSummaryDto(u.Department.Id, u.Department.Name) : null,
+                Manager = u.Manager != null ? new ManagerSummaryDto(u.Manager.Id, u.Manager.FullName) : null,
+                ActiveTasksCount = u.AssignedTasks.Count(t => t.Status != TaskLifecycleStatus.Completed)
+            })
             .ToListAsync(cancellationToken);
 
-        return new PagedResult<UserDto>
+        return new PagedResult<EmployeeListDto>
         {
             Items = items,
             PageNumber = filter.PageNumber,

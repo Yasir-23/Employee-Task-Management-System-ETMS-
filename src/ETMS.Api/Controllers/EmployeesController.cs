@@ -30,9 +30,9 @@ public class EmployeesController : ControllerBase
 
     [HttpGet]
     [Authorize(Roles = "Admin,Manager")]
-    [ProducesResponseType(typeof(PagedResult<UserDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PagedResult<EmployeeListDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<PagedResult<UserDto>>> GetAll([FromQuery] EmployeeFilterParams filter, CancellationToken cancellationToken)
+    public async Task<ActionResult<PagedResult<EmployeeListDto>>> GetAll([FromQuery] EmployeeFilterParams filter, CancellationToken cancellationToken)
     {
         return Ok(await _employeeService.GetEmployeesAsync(filter, cancellationToken));
     }
