@@ -84,7 +84,9 @@ public class EmployeeService : IEmployeeService
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
             var pattern = $"%{EscapeLikePattern(filter.Search.Trim())}%";
-            query = query.Where(u => EF.Functions.ILike(u.FullName, pattern) || EF.Functions.ILike(u.Email, pattern));
+            query = query.Where(u =>
+                EF.Functions.ILike(u.FullName, pattern, LikeEscapeCharacter)
+                || EF.Functions.ILike(u.Email, pattern, LikeEscapeCharacter));
         }
 
         if (filter.DepartmentId is { } departmentId)
@@ -126,7 +128,9 @@ public class EmployeeService : IEmployeeService
         };
     }
 
-    // PostgreSQL LIKE uses backslash as the default escape character.
+    // Npgsql emits ESCAPE '' unless an escape character is passed explicitly.
+    private const string LikeEscapeCharacter = "\\";
+
     private static string EscapeLikePattern(string value) =>
         value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 }

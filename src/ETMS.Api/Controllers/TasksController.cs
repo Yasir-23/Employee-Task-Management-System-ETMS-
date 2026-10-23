@@ -41,11 +41,22 @@ public class TasksController : ControllerBase
     }
 
     [HttpGet("{id:guid}")]
-    [ProducesResponseType(typeof(TaskResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(TaskDetailsDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<TaskResponseDto>> GetById(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<TaskDetailsDto>> GetById(Guid id, CancellationToken cancellationToken)
     {
         return Ok(await _taskService.GetTaskByIdAsync(User.GetUserId(), User.GetRole(), id, cancellationToken));
+    }
+
+    [HttpPost("{id:guid}/comments")]
+    [ProducesResponseType(typeof(CommentResponseDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<CommentResponseDto>> AddComment(Guid id, AddCommentRequest request, CancellationToken cancellationToken)
+    {
+        var comment = await _taskService.AddCommentAsync(User.GetUserId(), User.GetRole(), id, request, cancellationToken);
+        return CreatedAtAction(nameof(GetById), new { id }, comment);
     }
 
     [HttpPatch("{id:guid}/status")]

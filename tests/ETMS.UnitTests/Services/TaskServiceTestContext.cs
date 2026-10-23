@@ -1,9 +1,12 @@
 using ETMS.Api.Data;
+using ETMS.Api.Data.Interceptors;
 using ETMS.Api.DTOs.Requests;
 using ETMS.Api.Models.Entities;
 using ETMS.Api.Models.Enums;
 using ETMS.Api.Services.Implementations;
+using ETMS.Api.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using Moq;
 
 namespace ETMS.UnitTests.Services;
 
@@ -14,8 +17,13 @@ internal sealed class TaskServiceTestContext : IDisposable
 {
     public TaskServiceTestContext()
     {
+        // The real audit interceptor runs in every test; the "authenticated" user is whatever CurrentUserId is set to.
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(c => c.UserId).Returns(() => CurrentUserId);
+
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase($"etms-tests-{Guid.NewGuid()}")
+            .AddInterceptors(new TaskAuditSaveChangesInterceptor(currentUser.Object))
             .Options;
 
         Db = new AppDbContext(options);
@@ -31,7 +39,11 @@ internal sealed class TaskServiceTestContext : IDisposable
         ForeignEmployee = AddUser("Fiona Employee", Role.Employee, department.Id, OtherManager.Id);
 
         Db.SaveChanges();
+        CurrentUserId = Manager.Id;
     }
+
+    /// <summary>User the audit interceptor attributes changes to (simulates the HTTP request's user).</summary>
+    public Guid? CurrentUserId { get; set; }
 
     public AppDbContext Db { get; }
     public TaskService Service { get; }
@@ -50,7 +62,11 @@ internal sealed class TaskServiceTestContext : IDisposable
 
     public static DateTime FutureDueDate => DateTime.UtcNow.AddDays(3);
 
-    public TaskItem AddTask(Guid? assigneeId, TaskLifecycleStatus status = TaskLifecycleStatus.Pending, Guid? creatorId = null)
+    public TaskItem AddTask(
+        Guid? assigneeId,
+        TaskLifecycleStatus status = TaskLifecycleStatus.Pending,
+        Guid? creatorId = null,
+        DateTime? dueDateUtc = null)
     {
         var now = DateTime.UtcNow;
         var task = new TaskItem
@@ -60,7 +76,7 @@ internal sealed class TaskServiceTestContext : IDisposable
             Description = "Seeded task",
             Priority = TaskPriority.Medium,
             Status = status,
-            DueDateUtc = FutureDueDate,
+            DueDateUtc = dueDateUtc ?? FutureDueDate,
             CreatedByUserId = creatorId ?? Manager.Id,
             AssigneeId = assigneeId,
             CreatedAtUtc = now,

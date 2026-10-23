@@ -22,4 +22,14 @@ public static class TaskMappings
         CreatedAtUtc = t.CreatedAtUtc,
         UpdatedAtUtc = t.UpdatedAtUtc
     };
+
+    public static readonly Expression<Func<Comment, CommentResponseDto>> CommentToDtoExpression = c => new CommentResponseDto
+    {
+        Id = c.Id,
+        TaskId = c.TaskId,
+        UserId = c.UserId,
+        AuthorName = c.User.FullName,
+        Content = c.Content,
+        CreatedAtUtc = c.CreatedAtUtc
+    };
 }

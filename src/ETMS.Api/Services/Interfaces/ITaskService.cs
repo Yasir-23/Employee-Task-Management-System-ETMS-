@@ -9,7 +9,9 @@ public interface ITaskService
 
     Task<PagedResult<TaskResponseDto>> GetTasksAsync(Guid currentUserId, string role, TaskFilterParams filter, CancellationToken cancellationToken = default);
 
-    Task<TaskResponseDto> GetTaskByIdAsync(Guid currentUserId, string role, Guid taskId, CancellationToken cancellationToken = default);
+    Task<TaskDetailsDto> GetTaskByIdAsync(Guid currentUserId, string role, Guid taskId, CancellationToken cancellationToken = default);
+
+    Task<CommentResponseDto> AddCommentAsync(Guid currentUserId, string role, Guid taskId, AddCommentRequest request, CancellationToken cancellationToken = default);
 
     Task<TaskResponseDto> UpdateTaskStatusAsync(Guid currentUserId, Guid taskId, UpdateTaskStatusRequest request, CancellationToken cancellationToken = default);
 

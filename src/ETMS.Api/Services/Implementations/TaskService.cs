@@ -94,14 +94,86 @@ public class TaskService : ITaskService
         };
     }
 
-    public async Task<TaskResponseDto> GetTaskByIdAsync(Guid currentUserId, string role, Guid taskId, CancellationToken cancellationToken = default)
+    public async Task<TaskDetailsDto> GetTaskByIdAsync(Guid currentUserId, string role, Guid taskId, CancellationToken cancellationToken = default)
     {
         // Out-of-scope tasks are reported as 404 so their existence is not disclosed.
-        return await ScopeToUser(_db.Tasks.AsNoTracking(), currentUserId, role)
+        var task = await ScopeToUser(_db.Tasks.AsNoTracking(), currentUserId, role)
             .Where(t => t.Id == taskId)
             .Select(TaskMappings.ToDtoExpression)
             .SingleOrDefaultAsync(cancellationToken)
             ?? throw TaskNotFound(taskId);
+
+        var comments = await _db.Comments
+            .AsNoTracking()
+            .Where(c => c.TaskId == taskId)
+            .OrderBy(c => c.CreatedAtUtc)
+            .ThenBy(c => c.Id)
+            .Select(TaskMappings.CommentToDtoExpression)
+            .ToListAsync(cancellationToken);
+
+        var auditLogs = await _db.AuditLogs
+            .AsNoTracking()
+            .Where(a => a.TaskId == taskId)
+            .OrderBy(a => a.TimestampUtc)
+            .ThenBy(a => a.Id)
+            .Select(a => new AuditLogResponseDto
+            {
+                Id = a.Id,
+                ChangedByUserId = a.ChangedByUserId,
+                ChangedByName = a.ChangedByUser.FullName,
+                PropertyName = a.PropertyName,
+                OldValue = a.OldValue,
+                NewValue = a.NewValue,
+                TimestampUtc = a.TimestampUtc
+            })
+            .ToListAsync(cancellationToken);
+
+        return new TaskDetailsDto(task)
+        {
+            Comments = comments,
+            AuditLogs = auditLogs
+        };
+    }
+
+    public async Task<CommentResponseDto> AddCommentAsync(Guid currentUserId, string role, Guid taskId, AddCommentRequest request, CancellationToken cancellationToken = default)
+    {
+        var content = request.Content.Trim();
+        if (content.Length == 0)
+        {
+            throw new BadRequestException("Comment content is required.");
+        }
+
+        var task = await _db.Tasks
+            .AsNoTracking()
+            .Where(t => t.Id == taskId)
+            .Select(t => new { t.CreatedByUserId, t.AssigneeId })
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw TaskNotFound(taskId);
+
+        // API.md §3.6: only the assignee, the creator, or an Admin may comment.
+        var isAdmin = role == nameof(Role.Admin);
+        if (!isAdmin && task.CreatedByUserId != currentUserId && task.AssigneeId != currentUserId)
+        {
+            throw new ForbiddenException("Only the task's assignee, its creator, or an Admin can comment on it.");
+        }
+
+        var comment = new Comment
+        {
+            Id = Guid.NewGuid(),
+            TaskId = taskId,
+            UserId = currentUserId,
+            Content = content,
+            CreatedAtUtc = DateTime.UtcNow
+        };
+
+        _db.Comments.Add(comment);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        return await _db.Comments
+            .AsNoTracking()
+            .Where(c => c.Id == comment.Id)
+            .Select(TaskMappings.CommentToDtoExpression)
+            .SingleAsync(cancellationToken);
     }
 
     public async Task<TaskResponseDto> UpdateTaskStatusAsync(Guid currentUserId, Guid taskId, UpdateTaskStatusRequest request, CancellationToken cancellationToken = default)

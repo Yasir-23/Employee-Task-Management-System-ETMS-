@@ -1,9 +1,11 @@
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json.Serialization;
+using ETMS.Api.BackgroundWorkers;
 using ETMS.Api.Common.Middleware;
 using ETMS.Api.Common.Settings;
 using ETMS.Api.Data;
+using ETMS.Api.Data.Interceptors;
 using ETMS.Api.Services.Implementations;
 using ETMS.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -16,7 +18,13 @@ var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException("Connection string 'DefaultConnection' is not configured.");
 
-builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton<ICurrentUserService, HttpContextCurrentUserService>();
+builder.Services.AddSingleton<TaskAuditSaveChangesInterceptor>();
+
+builder.Services.AddDbContext<AppDbContext>((serviceProvider, options) => options
+    .UseNpgsql(connectionString)
+    .AddInterceptors(serviceProvider.GetRequiredService<TaskAuditSaveChangesInterceptor>()));
 
 // JWT settings
 var jwtSection = builder.Configuration.GetSection(JwtSettings.SectionName);
@@ -55,6 +63,15 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IDepartmentService, DepartmentService>();
 builder.Services.AddScoped<IEmployeeService, EmployeeService>();
 builder.Services.AddScoped<ITaskService, TaskService>();
+builder.Services.AddScoped<IEmailService, LoggingEmailService>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
+
+// Background notifications (SDD §6)
+builder.Services.AddOptions<NotificationWorkerSettings>()
+    .Bind(builder.Configuration.GetSection(NotificationWorkerSettings.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+builder.Services.AddHostedService<TaskNotificationWorker>();
 
 builder.Services.AddProblemDetails();
 builder.Services
