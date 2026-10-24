@@ -80,6 +80,6 @@ This informal process has resulted in:
 
 ### 5. Out of Scope for Phase 1
 - Native mobile clients (Android/iOS).
-- File attachments (S3/Blob storage uploads on task comments).
+- File attachments (S3/Blob storage uploads on task comments). *Superseded in Phase 2 (Milestone 6): task-level attachments on local volume storage are now in scope; S3/Blob providers and comment-level attachments remain out of scope.*
 - Multi-language localization (English only for V1).
 - Direct peer-to-peer real-time chat messaging.
