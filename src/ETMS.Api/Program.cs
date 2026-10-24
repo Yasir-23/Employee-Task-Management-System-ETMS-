@@ -8,6 +8,8 @@ using ETMS.Api.Data;
 using ETMS.Api.Data.Interceptors;
 using ETMS.Api.Services.Implementations;
 using ETMS.Api.Services.Interfaces;
+using ETMS.Api.Services.Pdf;
+using ETMS.Api.Services.Storage;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -66,6 +68,18 @@ builder.Services.AddScoped<ITaskService, TaskService>();
 builder.Services.AddScoped<IEmailService, LoggingEmailService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IReportService, ReportService>();
+
+// Attachments & PDF reporting (SDD §7, §8)
+builder.Services.AddOptions<StorageSettings>()
+    .Bind(builder.Configuration.GetSection(StorageSettings.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+builder.Services.AddSingleton<IStorageService, LocalStorageService>();
+builder.Services.AddScoped<IAttachmentService, AttachmentService>();
+builder.Services.AddScoped<IReportPdfService, ReportPdfService>();
+
+// The Community license applies only below QuestPDF's revenue threshold; confirm eligibility before production.
+QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
 
 // Background notifications (SDD §6)
 builder.Services.AddOptions<NotificationWorkerSettings>()

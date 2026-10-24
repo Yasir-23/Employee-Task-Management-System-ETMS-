@@ -82,3 +82,6 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
+
+# Local attachment storage (Storage:LocalStoragePath)
+**/App_Data/

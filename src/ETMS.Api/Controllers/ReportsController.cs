@@ -1,6 +1,7 @@
 using ETMS.Api.Common.Extensions;
 using ETMS.Api.DTOs.Responses;
 using ETMS.Api.Services.Interfaces;
+using ETMS.Api.Services.Pdf;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -13,10 +14,12 @@ namespace ETMS.Api.Controllers;
 public class ReportsController : ControllerBase
 {
     private readonly IReportService _reportService;
+    private readonly IReportPdfService _reportPdfService;
 
-    public ReportsController(IReportService reportService)
+    public ReportsController(IReportService reportService, IReportPdfService reportPdfService)
     {
         _reportService = reportService;
+        _reportPdfService = reportPdfService;
     }
 
     /// <summary>Task counts by status plus overdue count; organization-wide for Admins, team-scoped for Managers.</summary>
@@ -53,5 +56,22 @@ public class ReportsController : ControllerBase
         CancellationToken cancellationToken)
     {
         return Ok(await _reportService.GetDepartmentPerformanceAsync(from, to, cancellationToken));
+    }
+
+    /// <summary>The department performance report as a downloadable PDF (FR-DOC-03). Same window rules as the JSON report.</summary>
+    /// <param name="from">Window start (UTC). Defaults to 30 days before <paramref name="to"/>.</param>
+    /// <param name="to">Window end (UTC). A date without a time includes that whole day. Defaults to now.</param>
+    /// <param name="cancellationToken">Request cancellation.</param>
+    [HttpGet("department-performance/pdf")]
+    [Authorize(Roles = "Admin")]
+    [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK, "application/pdf")]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetDepartmentPerformancePdf(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        CancellationToken cancellationToken)
+    {
+        var pdfBytes = await _reportPdfService.GenerateDepartmentPerformancePdfAsync(from, to, cancellationToken);
+        return File(pdfBytes, "application/pdf", "department-performance-report.pdf");
     }
 }

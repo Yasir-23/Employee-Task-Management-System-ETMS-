@@ -120,6 +120,14 @@ public class TaskService : ITaskService
             .Select(TaskMappings.CommentToDtoExpression)
             .ToListAsync(cancellationToken);
 
+        var attachments = await _db.TaskAttachments
+            .AsNoTracking()
+            .Where(a => a.TaskId == taskId)
+            .OrderBy(a => a.UploadedAtUtc)
+            .ThenBy(a => a.Id)
+            .Select(TaskMappings.AttachmentToDtoExpression)
+            .ToListAsync(cancellationToken);
+
         var auditLogs = await _db.AuditLogs
             .AsNoTracking()
             .Where(a => a.TaskId == taskId)
@@ -140,6 +148,7 @@ public class TaskService : ITaskService
         return new TaskDetailsDto(task)
         {
             Comments = comments,
+            Attachments = attachments,
             AuditLogs = auditLogs
         };
     }

@@ -141,6 +141,56 @@ namespace ETMS.Api.Data.Migrations
                     b.ToTable("RefreshTokens", (string)null);
                 });
 
+            modelBuilder.Entity("ETMS.Api.Models.Entities.TaskAttachment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(127)
+                        .HasColumnType("character varying(127)");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<long>("FileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("StoragePath")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UploadedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UploadedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StoragePath")
+                        .IsUnique()
+                        .HasDatabaseName("UX_TaskAttachments_StoragePath");
+
+                    b.HasIndex("TaskId")
+                        .HasDatabaseName("IX_TaskAttachments_TaskId");
+
+                    b.HasIndex("UploadedByUserId");
+
+                    b.ToTable("TaskAttachments", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_TaskAttachments_FileSizeBytes", "\"FileSizeBytes\" BETWEEN 1 AND 10485760");
+                        });
+                });
+
             modelBuilder.Entity("ETMS.Api.Models.Entities.TaskItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -295,6 +345,25 @@ namespace ETMS.Api.Data.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("ETMS.Api.Models.Entities.TaskAttachment", b =>
+                {
+                    b.HasOne("ETMS.Api.Models.Entities.TaskItem", "Task")
+                        .WithMany("Attachments")
+                        .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ETMS.Api.Models.Entities.User", "UploadedByUser")
+                        .WithMany()
+                        .HasForeignKey("UploadedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Task");
+
+                    b.Navigation("UploadedByUser");
+                });
+
             modelBuilder.Entity("ETMS.Api.Models.Entities.TaskItem", b =>
                 {
                     b.HasOne("ETMS.Api.Models.Entities.User", "Assignee")
@@ -337,6 +406,8 @@ namespace ETMS.Api.Data.Migrations
 
             modelBuilder.Entity("ETMS.Api.Models.Entities.TaskItem", b =>
                 {
+                    b.Navigation("Attachments");
+
                     b.Navigation("AuditLogs");
 
                     b.Navigation("Comments");

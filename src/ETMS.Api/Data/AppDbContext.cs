@@ -15,6 +15,7 @@ public class AppDbContext : DbContext
     public DbSet<TaskItem> Tasks => Set<TaskItem>();
     public DbSet<Comment> Comments => Set<Comment>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<TaskAttachment> TaskAttachments => Set<TaskAttachment>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -144,6 +145,33 @@ public class AppDbContext : DbContext
             entity.HasOne(a => a.ChangedByUser)
                 .WithMany()
                 .HasForeignKey(a => a.ChangedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // SDD §3.7
+        modelBuilder.Entity<TaskAttachment>(entity =>
+        {
+            entity.ToTable("TaskAttachments", t => t.HasCheckConstraint(
+                "CK_TaskAttachments_FileSizeBytes", "\"FileSizeBytes\" BETWEEN 1 AND 10485760"));
+            entity.HasKey(a => a.Id);
+
+            entity.Property(a => a.FileName).HasMaxLength(255).IsRequired();
+            entity.Property(a => a.StoragePath).HasMaxLength(500).IsRequired();
+            entity.Property(a => a.ContentType).HasMaxLength(127).IsRequired();
+            entity.Property(a => a.FileSizeBytes).IsRequired();
+            entity.Property(a => a.UploadedAtUtc).IsRequired();
+
+            entity.HasIndex(a => a.TaskId).HasDatabaseName("IX_TaskAttachments_TaskId");
+            entity.HasIndex(a => a.StoragePath).IsUnique().HasDatabaseName("UX_TaskAttachments_StoragePath");
+
+            entity.HasOne(a => a.Task)
+                .WithMany(t => t.Attachments)
+                .HasForeignKey(a => a.TaskId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(a => a.UploadedByUser)
+                .WithMany()
+                .HasForeignKey(a => a.UploadedByUserId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }

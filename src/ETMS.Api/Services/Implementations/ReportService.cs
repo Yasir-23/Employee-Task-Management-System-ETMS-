@@ -138,7 +138,7 @@ public class ReportService : IReportService
     /// Returns a [start, end) window. Defaults to the last 30 days. A date-only <paramref name="toUtc"/>
     /// (e.g. 2026-10-23) includes that whole day.
     /// </summary>
-    private static (DateTime Start, DateTime End) ResolveWindow(DateTime? fromUtc, DateTime? toUtc)
+    public static (DateTime Start, DateTime End) ResolveWindow(DateTime? fromUtc, DateTime? toUtc)
     {
         var end = toUtc is { } to
             ? (to.TimeOfDay == TimeSpan.Zero ? AsUtc(to).AddDays(1) : AsUtc(to))

@@ -1,5 +1,6 @@
 using ETMS.Api.Common.Exceptions;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.WebUtilities;
 
 namespace ETMS.Api.Common.Middleware;
 
@@ -43,6 +44,19 @@ public class GlobalExceptionMiddleware
                     Status = appException.StatusCode,
                     Title = appException.Title,
                     Detail = appException.Message
+                };
+            }
+            else if (ex is BadHttpRequestException badRequest)
+            {
+                // Raised by the server itself, e.g. 413 when a body exceeds [RequestSizeLimit].
+                _logger.LogInformation("Request {Method} {Path} rejected by the server with {StatusCode}: {Message}",
+                    context.Request.Method, context.Request.Path, badRequest.StatusCode, badRequest.Message);
+
+                problem = new ProblemDetails
+                {
+                    Status = badRequest.StatusCode,
+                    Title = ReasonPhrases.GetReasonPhrase(badRequest.StatusCode),
+                    Detail = badRequest.Message
                 };
             }
             else

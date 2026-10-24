@@ -33,6 +33,10 @@ services:
       ConnectionStrings__DefaultConnection: "Host=db;Port=5432;Database=etms_db;Username=postgres;Password=postgrespassword"
     ports:
       - "5000:8080"
+    volumes:
+      # Task attachments (SDD §7.2) survive container rebuilds.
+      - etms_attachments:/app/App_Data/Uploads
 
 volumes:
   etms_postgres_data:
+  etms_attachments:

@@ -24,6 +24,10 @@ EXPOSE 8080
 
 COPY --from=build /app/publish .
 
+# Attachment storage (Storage:LocalStoragePath). Created up front and owned by the app user, because
+# /app itself is root-owned; docker-compose mounts a named volume here, which inherits this ownership.
+RUN mkdir -p /app/App_Data/Uploads && chown -R $APP_UID /app/App_Data
+
 # Run as the image's built-in non-root user.
 USER $APP_UID
 

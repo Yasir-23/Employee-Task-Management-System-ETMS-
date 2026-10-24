@@ -32,4 +32,14 @@ public static class TaskMappings
         Content = c.Content,
         CreatedAtUtc = c.CreatedAtUtc
     };
+
+    public static readonly Expression<Func<TaskAttachment, TaskAttachmentResponseDto>> AttachmentToDtoExpression = a => new TaskAttachmentResponseDto(
+        a.Id,
+        a.TaskId,
+        a.FileName,
+        a.ContentType,
+        a.FileSizeBytes,
+        a.UploadedByUserId,
+        a.UploadedByUser.FullName,
+        a.UploadedAtUtc);
 }
