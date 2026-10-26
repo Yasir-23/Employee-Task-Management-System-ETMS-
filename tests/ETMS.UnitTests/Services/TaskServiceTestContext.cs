@@ -5,6 +5,7 @@ using ETMS.Api.Models.Entities;
 using ETMS.Api.Models.Enums;
 using ETMS.Api.Services.Implementations;
 using ETMS.Api.Services.Interfaces;
+using ETMS.Api.Services.Webhooks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -28,7 +29,8 @@ internal sealed class TaskServiceTestContext : IDisposable
             .Options;
 
         Db = new AppDbContext(options);
-        Service = new TaskService(Db, Email.Object, NullLogger<TaskService>.Instance);
+        Webhooks = new WebhookDispatcher(Db);
+        Service = new TaskService(Db, Email.Object, Webhooks, NullLogger<TaskService>.Instance);
 
         var department = new Department { Id = Guid.NewGuid(), Name = "Engineering", CreatedAtUtc = DateTime.UtcNow };
         Db.Departments.Add(department);
@@ -48,6 +50,9 @@ internal sealed class TaskServiceTestContext : IDisposable
 
     public AppDbContext Db { get; }
     public TaskService Service { get; }
+
+    /// <summary>Real outbox dispatcher used by <see cref="Service"/> (FR-HOOK-03).</summary>
+    public WebhookDispatcher Webhooks { get; }
 
     /// <summary>Email sink used by <see cref="Service"/> for assignment notifications (FR-NOTIF-01).</summary>
     public Mock<IEmailService> Email { get; } = new();

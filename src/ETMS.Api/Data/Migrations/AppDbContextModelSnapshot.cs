@@ -359,6 +359,94 @@ namespace ETMS.Api.Data.Migrations
                     b.ToTable("Users", (string)null);
                 });
 
+            modelBuilder.Entity("ETMS.Api.Models.Entities.WebhookDeliveryLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("AttemptCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<bool>("IsSuccess")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<DateTime?>("NextRetryUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<int?>("StatusCode")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("SubscriptionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("TimestampUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NextRetryUtc")
+                        .HasDatabaseName("IX_WebhookDeliveryLogs_Pending")
+                        .HasFilter("\"IsSuccess\" = FALSE AND \"AttemptCount\" < 6");
+
+                    b.HasIndex("SubscriptionId")
+                        .HasDatabaseName("IX_WebhookDeliveryLogs_SubscriptionId");
+
+                    b.ToTable("WebhookDeliveryLogs", (string)null);
+                });
+
+            modelBuilder.Entity("ETMS.Api.Models.Entities.WebhookSubscription", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("SecretKey")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventType", "IsActive")
+                        .HasDatabaseName("IX_WebhookSubscriptions_EventType_IsActive");
+
+                    b.ToTable("WebhookSubscriptions", (string)null);
+                });
+
             modelBuilder.Entity("ETMS.Api.Models.Entities.AuditLog", b =>
                 {
                     b.HasOne("ETMS.Api.Models.Entities.User", "ChangedByUser")
@@ -473,6 +561,17 @@ namespace ETMS.Api.Data.Migrations
                     b.Navigation("Manager");
                 });
 
+            modelBuilder.Entity("ETMS.Api.Models.Entities.WebhookDeliveryLog", b =>
+                {
+                    b.HasOne("ETMS.Api.Models.Entities.WebhookSubscription", "Subscription")
+                        .WithMany("Deliveries")
+                        .HasForeignKey("SubscriptionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Subscription");
+                });
+
             modelBuilder.Entity("ETMS.Api.Models.Entities.Department", b =>
                 {
                     b.Navigation("Users");
@@ -498,6 +597,11 @@ namespace ETMS.Api.Data.Migrations
                     b.Navigation("CreatedTasks");
 
                     b.Navigation("Subordinates");
+                });
+
+            modelBuilder.Entity("ETMS.Api.Models.Entities.WebhookSubscription", b =>
+                {
+                    b.Navigation("Deliveries");
                 });
 #pragma warning restore 612, 618
         }

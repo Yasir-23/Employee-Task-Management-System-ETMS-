@@ -13,7 +13,21 @@ public interface IPaymentGatewayService
 
     /// <summary>Looks up an existing session, used to reuse one that is still open.</summary>
     Task<CheckoutSessionResult> GetCheckoutSessionAsync(string sessionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// BR-08: verifies the provider's signature header against the raw body, then maps the event.
+    /// Throws WebhookSignatureException (missing/malformed header -> 400, mismatch/stale -> 401).
+    /// </summary>
+    PaymentWebhookEvent ParseWebhookEvent(string rawBody, string? signatureHeader);
 }
+
+/// <param name="EventId">Provider event ID (Stripe "evt_...").</param>
+/// <param name="Type">Provider event type, e.g. "checkout.session.completed".</param>
+/// <param name="SessionId">Checkout session the event belongs to, when the event carries one.</param>
+/// <param name="PaymentIntentId">Payment intent ("pi_...") when known.</param>
+/// <param name="PaymentStatus">Session payment_status or payment intent status.</param>
+/// <param name="TaskBillingId">The billing ID from the metadata set at checkout.</param>
+public sealed record PaymentWebhookEvent(string EventId, string Type, string? SessionId, string? PaymentIntentId, string? PaymentStatus, Guid? TaskBillingId);
 
 /// <param name="SessionId">Provider session ID (Stripe "cs_...").</param>
 /// <param name="Url">Hosted checkout URL; only present while the session is open.</param>

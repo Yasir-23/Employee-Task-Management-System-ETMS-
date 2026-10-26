@@ -170,6 +170,91 @@ public partial class BillingService : IBillingService
         return ToDto(billing);
     }
 
+    public async Task HandleWebhookEventAsync(PaymentWebhookEvent webhookEvent, CancellationToken cancellationToken = default)
+    {
+        var target = webhookEvent.Type switch
+        {
+            // "unpaid" means a delayed payment method; async_payment_succeeded/failed follows later.
+            "checkout.session.completed" when webhookEvent.PaymentStatus is "paid" or "no_payment_required" => BillingStatus.Paid,
+            "checkout.session.async_payment_succeeded" or "payment_intent.succeeded" => BillingStatus.Paid,
+            "checkout.session.async_payment_failed" or "payment_intent.payment_failed" => BillingStatus.Failed,
+            "checkout.session.expired" => BillingStatus.Unpaid,
+            _ => (BillingStatus?)null
+        };
+
+        if (target is null)
+        {
+            _logger.LogDebug("Ignoring Stripe event {EventId} of unhandled type {EventType}.", webhookEvent.EventId, webhookEvent.Type);
+            return;
+        }
+
+        // SDD §9.3: on a concurrent update (xmin), reload and re-evaluate once.
+        for (var attempt = 1; ; attempt++)
+        {
+            var billing = await FindBillingForEventAsync(webhookEvent, cancellationToken);
+            if (billing is null)
+            {
+                _logger.LogWarning("Stripe event {EventId} ({EventType}) matches no billing or only a stale session; ignored.",
+                    webhookEvent.EventId, webhookEvent.Type);
+                return;
+            }
+
+            if (!IsWebhookTransitionAllowed(billing.Status, target.Value))
+            {
+                _logger.LogInformation("Stripe event {EventId} ({EventType}) does not apply to billing {BillingId} in {Status}; treated as a replay.",
+                    webhookEvent.EventId, webhookEvent.Type, billing.Id, billing.Status);
+                return;
+            }
+
+            var now = DateTime.UtcNow;
+            billing.Status = target.Value;
+            billing.UpdatedAtUtc = now;
+            billing.StripePaymentIntentId = webhookEvent.PaymentIntentId ?? billing.StripePaymentIntentId;
+            if (target == BillingStatus.Paid)
+            {
+                billing.PaidAtUtc = now;
+            }
+
+            try
+            {
+                await _db.SaveChangesAsync(cancellationToken);
+                _logger.LogInformation("Billing {BillingId} moved to {Status} by Stripe event {EventId}.", billing.Id, billing.Status, webhookEvent.EventId);
+                return;
+            }
+            catch (DbUpdateConcurrencyException) when (attempt == 1)
+            {
+                _db.ChangeTracker.Clear();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Webhook-driven transitions (FR-PAY-03). A payment that succeeds after an earlier failed card attempt on the
+    /// same session (Failed -> Paid) is accepted, otherwise money taken by Stripe would never be recorded.
+    /// </summary>
+    private static bool IsWebhookTransitionAllowed(BillingStatus current, BillingStatus target) => (current, target) switch
+    {
+        (BillingStatus.Processing, BillingStatus.Paid) => true,
+        (BillingStatus.Failed, BillingStatus.Paid) => true,
+        (BillingStatus.Processing, BillingStatus.Failed) => true,
+        (BillingStatus.Processing, BillingStatus.Unpaid) => true,
+        _ => false
+    };
+
+    private Task<TaskBilling?> FindBillingForEventAsync(PaymentWebhookEvent webhookEvent, CancellationToken cancellationToken)
+    {
+        // Matching on the billing's current session means events for a replaced (stale) session find nothing.
+        if (webhookEvent.SessionId is not null)
+        {
+            return _db.TaskBillings.SingleOrDefaultAsync(b => b.StripeSessionId == webhookEvent.SessionId, cancellationToken);
+        }
+
+        // payment_intent.* events carry no session; they are correlated through the checkout metadata.
+        return webhookEvent.TaskBillingId is { } billingId
+            ? _db.TaskBillings.SingleOrDefaultAsync(b => b.Id == billingId, cancellationToken)
+            : Task.FromResult<TaskBilling?>(null);
+    }
+
     private async Task<TaskItem> LoadTaskForBillingAsync(Guid taskId, CancellationToken cancellationToken) =>
         await _db.Tasks
             .Include(t => t.Billing)

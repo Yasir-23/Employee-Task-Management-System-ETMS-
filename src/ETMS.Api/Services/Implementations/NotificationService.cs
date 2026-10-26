@@ -2,6 +2,7 @@ using System.Globalization;
 using ETMS.Api.Data;
 using ETMS.Api.Models.Enums;
 using ETMS.Api.Services.Interfaces;
+using ETMS.Api.Services.Webhooks;
 using Microsoft.EntityFrameworkCore;
 
 namespace ETMS.Api.Services.Implementations;
@@ -13,11 +14,13 @@ public class NotificationService : INotificationService
 
     private readonly AppDbContext _db;
     private readonly IEmailService _emailService;
+    private readonly IWebhookDispatcher _webhooks;
 
-    public NotificationService(AppDbContext db, IEmailService emailService)
+    public NotificationService(AppDbContext db, IEmailService emailService, IWebhookDispatcher webhooks)
     {
         _db = db;
         _emailService = emailService;
+        _webhooks = webhooks;
     }
 
     public async Task<int> SendDueDateRemindersAsync(CancellationToken cancellationToken = default)
@@ -74,6 +77,9 @@ public class NotificationService : INotificationService
                 cancellationToken);
 
             task.OverdueAlertSent = true;
+            // Committed with the flag, so the event is emitted exactly once per overdue task.
+            await _webhooks.EnqueueAsync(WebhookEventTypes.TaskOverdue, new TaskOverdueEventData(
+                task.Id, task.AssigneeId, task.CreatedByUserId, task.Status, task.DueDateUtc), cancellationToken);
             await _db.SaveChangesAsync(cancellationToken);
         }
 

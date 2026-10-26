@@ -17,6 +17,8 @@ public class AppDbContext : DbContext
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<TaskAttachment> TaskAttachments => Set<TaskAttachment>();
     public DbSet<TaskBilling> TaskBillings => Set<TaskBilling>();
+    public DbSet<WebhookSubscription> WebhookSubscriptions => Set<WebhookSubscription>();
+    public DbSet<WebhookDeliveryLog> WebhookDeliveryLogs => Set<WebhookDeliveryLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -204,6 +206,49 @@ public class AppDbContext : DbContext
             entity.HasOne(b => b.Task)
                 .WithOne(t => t.Billing)
                 .HasForeignKey<TaskBilling>(b => b.TaskId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // SDD §3.9
+        modelBuilder.Entity<WebhookSubscription>(entity =>
+        {
+            entity.ToTable("WebhookSubscriptions");
+            entity.HasKey(s => s.Id);
+
+            entity.Property(s => s.Url).HasMaxLength(2048).IsRequired();
+            // Data Protection ciphertext is longer than the secret itself, so this is unbounded text.
+            entity.Property(s => s.SecretKey).HasColumnType("text").IsRequired();
+            entity.Property(s => s.EventType).HasMaxLength(64).IsRequired();
+            // Sentinel true: EF omits IsActive on insert when true (the DB default) and writes false explicitly.
+            entity.Property(s => s.IsActive).IsRequired().HasDefaultValue(true).HasSentinel(true);
+            entity.Property(s => s.CreatedAtUtc).IsRequired();
+
+            // Fan-out lookup at enqueue time.
+            entity.HasIndex(s => new { s.EventType, s.IsActive }).HasDatabaseName("IX_WebhookSubscriptions_EventType_IsActive");
+        });
+
+        // SDD §3.10. No FK to Tasks/Users: the task ID travels inside Payload.
+        modelBuilder.Entity<WebhookDeliveryLog>(entity =>
+        {
+            entity.ToTable("WebhookDeliveryLogs");
+            entity.HasKey(d => d.Id);
+
+            entity.Property(d => d.EventType).HasMaxLength(64).IsRequired();
+            entity.Property(d => d.Payload).HasColumnType("jsonb").IsRequired();
+            entity.Property(d => d.IsSuccess).IsRequired().HasDefaultValue(false);
+            entity.Property(d => d.AttemptCount).IsRequired().HasDefaultValue(0);
+            entity.Property(d => d.TimestampUtc).IsRequired();
+
+            // Worker polling: only rows that can still be attempted are indexed.
+            entity.HasIndex(d => d.NextRetryUtc)
+                .HasFilter("\"IsSuccess\" = FALSE AND \"AttemptCount\" < 6")
+                .HasDatabaseName("IX_WebhookDeliveryLogs_Pending");
+            entity.HasIndex(d => d.SubscriptionId).HasDatabaseName("IX_WebhookDeliveryLogs_SubscriptionId");
+
+            // Subscriptions are soft-deleted, so delivery history is never cascade-deleted.
+            entity.HasOne(d => d.Subscription)
+                .WithMany(s => s.Deliveries)
+                .HasForeignKey(d => d.SubscriptionId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }

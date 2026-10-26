@@ -8,6 +8,7 @@ using ETMS.Api.DTOs.Responses;
 using ETMS.Api.Models.Entities;
 using ETMS.Api.Models.Enums;
 using ETMS.Api.Services.Interfaces;
+using ETMS.Api.Services.Webhooks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 
@@ -19,12 +20,14 @@ public class TaskService : ITaskService
 
     private readonly AppDbContext _db;
     private readonly IEmailService _emailService;
+    private readonly IWebhookDispatcher _webhooks;
     private readonly ILogger<TaskService> _logger;
 
-    public TaskService(AppDbContext db, IEmailService emailService, ILogger<TaskService> logger)
+    public TaskService(AppDbContext db, IEmailService emailService, IWebhookDispatcher webhooks, ILogger<TaskService> logger)
     {
         _db = db;
         _emailService = emailService;
+        _webhooks = webhooks;
         _logger = logger;
     }
 
@@ -60,6 +63,9 @@ public class TaskService : ITaskService
         };
 
         _db.Tasks.Add(task);
+        // FR-HOOK-03: outbox rows are saved by the same SaveChanges as the task.
+        await _webhooks.EnqueueAsync(WebhookEventTypes.TaskCreated, new TaskCreatedEventData(
+            task.Id, task.Title, task.Priority, task.Status, task.DueDateUtc, task.AssigneeId, creatorUserId), cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
         await CommitAsync(transaction, cancellationToken);
 
@@ -220,8 +226,17 @@ public class TaskService : ITaskService
                 $"Invalid status transition from {task.Status} to {newStatus}. The next allowed status is {task.Status + 1}.");
         }
 
+        var oldStatus = task.Status;
         task.Status = newStatus;
         task.UpdatedAtUtc = DateTime.UtcNow;
+
+        await _webhooks.EnqueueAsync(WebhookEventTypes.TaskStatusChanged,
+            new TaskStatusChangedEventData(task.Id, oldStatus, newStatus, currentUserId), cancellationToken);
+        if (newStatus == TaskLifecycleStatus.Completed)
+        {
+            await _webhooks.EnqueueAsync(WebhookEventTypes.TaskCompleted,
+                new TaskCompletedEventData(task.Id, task.AssigneeId, task.UpdatedAtUtc), cancellationToken);
+        }
 
         await _db.SaveChangesAsync(cancellationToken);
 
@@ -260,11 +275,14 @@ public class TaskService : ITaskService
 
         await EnsureActiveTaskCapacityAsync(newAssigneeId, cancellationToken);
 
+        var previousAssigneeId = task.AssigneeId;
         task.AssigneeId = newAssigneeId;
         // The new assignee has not received this task's 24-hour reminder yet.
         task.ReminderSent = false;
         task.UpdatedAtUtc = DateTime.UtcNow;
 
+        await _webhooks.EnqueueAsync(WebhookEventTypes.TaskReassigned,
+            new TaskReassignedEventData(task.Id, previousAssigneeId, newAssigneeId, currentManagerId), cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
         await CommitAsync(transaction, cancellationToken);
 

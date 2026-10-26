@@ -311,9 +311,14 @@ Defines or updates the billable amount (FR-PAY-01). A task must have a billing r
 | `checkout.session.async_payment_failed` | `Processing` → `Failed` |
 | `payment_intent.payment_failed` | `Processing` → `Failed` |
 | `checkout.session.expired` | `Processing` → `Unpaid` |
+| `payment_intent.succeeded` | `Processing` / `Failed` → `Paid` (correlated through the `BillingId` metadata set at checkout) |
 | *any other type* | ignored, `200 OK` |
 
-* **Success Response (200 OK):** empty body. Also returned for replays, stale sessions, and ignored types.
+* **Success Response (200 OK):** also returned for replays, stale sessions, and ignored types.
+```json
+{ "received": true }
+```
+* **Note:** a success event (`checkout.session.completed` with `payment_status = paid`, `checkout.session.async_payment_succeeded`, or `payment_intent.succeeded`) for the billing's current session also moves `Failed` → `Paid`, because the payer may retry after a declined card (SRS FR-PAY-03).
 * **Error Responses:**
 
 | Status | Condition |
@@ -337,7 +342,7 @@ Defines or updates the billable amount (FR-PAY-01). A task must have a billing r
 | Field | Type | Required | Rules |
 | :--- | :--- | :---: | :--- |
 | `url` | string | Yes | Absolute `https` URL, ≤ 2048 chars; not localhost, a loopback, link-local, or private IP |
-| `eventType` | string | Yes | `task.created`, `task.reassigned`, `task.status_changed`, `task.completed`, or `*` |
+| `eventType` | string | Yes | `task.created`, `task.reassigned`, `task.status_changed`, `task.completed`, `task.overdue`, or `*` |
 
 * **Success Response (201 Created):** `Location: /api/webhooks/subscriptions/{id}`. **`secretKey` is returned only in this response.**
 ```json
@@ -393,8 +398,8 @@ Defines or updates the billable amount (FR-PAY-01). A task must have a billing r
 | :--- | :--- | :--- |
 | `Content-Type` | `application/json` | |
 | `X-ETMS-Event` | `task.status_changed` | Event type |
-| `X-ETMS-Delivery` | `48213` | Unique delivery ID; use it to deduplicate (at-least-once delivery) |
-| `X-ETMS-Signature` | `t=1792836751,v1=9f2c...` | `v1 = hex(HMAC-SHA256(secretKey, "{t}.{rawBody}"))` |
+| `X-ETMS-Delivery` | `3f2b8c1e-6d4a-4e0b-9a7c-5b1d2e3f4a50` | Unique delivery ID (UUID); use it to deduplicate (at-least-once delivery) |
+| `X-ETMS-Signature` | `t=1792836751,v1=9f2c...` | Format `t={timestamp},v1={hash}`: `timestamp` is Unix seconds at send time; `hash = hex(HMAC-SHA256(secretKey, "{timestamp}.{rawBody}"))`, lowercase |
 
 * **Body (envelope):**
 ```json
@@ -418,6 +423,7 @@ Defines or updates the billable amount (FR-PAY-01). A task must have a billing r
 | `task.reassigned` | `taskId`, `previousAssigneeId`, `newAssigneeId`, `changedByUserId` |
 | `task.status_changed` | `taskId`, `oldStatus`, `newStatus`, `changedByUserId` |
 | `task.completed` | `taskId`, `assigneeId`, `completedAtUtc` (sent in addition to `task.status_changed`) |
+| `task.overdue` | `taskId`, `assigneeId`, `createdByUserId`, `status`, `dueDateUtc` (sent once, when the overdue alert is raised) |
 
 * **Receiver expectations:**
   - Verify the signature with a constant-time comparison.

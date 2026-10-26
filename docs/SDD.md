@@ -282,14 +282,15 @@ There is one row per (event, subscription) delivery. The row is created in the t
 
 | Column | Type | Constraints / Notes |
 | :--- | :--- | :--- |
-| `Id` | BIGINT | PRIMARY KEY, IDENTITY. Sent to receivers as `X-ETMS-Delivery`. |
+| `Id` | UUID | PRIMARY KEY. Sent to receivers as `X-ETMS-Delivery`. |
 | `SubscriptionId` | UUID | FK → `WebhookSubscriptions(Id)`, ON DELETE RESTRICT, NOT NULL |
 | `EventType` | VARCHAR(64) | NOT NULL. The concrete event type (never `*`). |
 | `Payload` | JSONB | NOT NULL. The full event envelope, frozen at enqueue time. |
 | `StatusCode` | INT | NULLABLE. HTTP status of the last attempt. NULL if no attempt yet or if there was a network error or timeout. |
 | `IsSuccess` | BOOLEAN | NOT NULL, DEFAULT FALSE |
 | `AttemptCount` | INT | NOT NULL, DEFAULT 0. `0` = not yet attempted; `6` with `IsSuccess = false` = dead-lettered. |
-| `TimestampUtc` | TIMESTAMP WITH TIME ZONE | NOT NULL. Enqueue time while `AttemptCount = 0`, otherwise the time of the last attempt. Used with `AttemptCount` to compute the next due time. |
+| `NextRetryUtc` | TIMESTAMP WITH TIME ZONE | NULLABLE. When the worker may next attempt the row: enqueue time initially, then last attempt + backoff (§10.3). NULL once delivered or dead-lettered. |
+| `TimestampUtc` | TIMESTAMP WITH TIME ZONE | NOT NULL. Enqueue time while `AttemptCount = 0`, otherwise the time of the last attempt. |
 
 4. Database Indexes
 IX_Users_Email: Unique index on Users(Email)
@@ -312,7 +313,7 @@ UX_TaskBillings_StripeSessionId: Unique partial index on TaskBillings(StripeSess
 
 IX_WebhookSubscriptions_EventType_IsActive: Composite index on WebhookSubscriptions(EventType, IsActive) for fan-out at enqueue time
 
-IX_WebhookDeliveryLogs_Pending: Partial index on WebhookDeliveryLogs(TimestampUtc) WHERE IsSuccess = FALSE AND AttemptCount < 6 (worker polling)
+IX_WebhookDeliveryLogs_Pending: Partial index on WebhookDeliveryLogs(NextRetryUtc) WHERE IsSuccess = FALSE AND AttemptCount < 6 (worker polling)
 
 IX_WebhookDeliveryLogs_SubscriptionId: Index on WebhookDeliveryLogs(SubscriptionId)
 

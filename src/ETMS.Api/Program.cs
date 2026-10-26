@@ -11,7 +11,9 @@ using ETMS.Api.Services.Billing;
 using ETMS.Api.Services.Interfaces;
 using ETMS.Api.Services.Pdf;
 using ETMS.Api.Services.Storage;
+using ETMS.Api.Services.Webhooks;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -107,6 +109,32 @@ builder.Services.AddScoped<Stripe.IStripeClient>(serviceProvider => new Stripe.S
         maxNetworkRetries: 2)));
 builder.Services.AddScoped<IPaymentGatewayService, StripePaymentGatewayService>();
 builder.Services.AddScoped<IBillingService, BillingService>();
+
+// Webhooks (SDD §10). Subscription secrets are encrypted with Data Protection; the key ring must be
+// persisted (DataProtection:KeyRingPath on a volume) or secrets become unreadable after a restart.
+var dataProtection = builder.Services.AddDataProtection().SetApplicationName("ETMS");
+if (builder.Configuration["DataProtection:KeyRingPath"] is { Length: > 0 } keyRingPath)
+{
+    dataProtection.PersistKeysToFileSystem(new DirectoryInfo(keyRingPath));
+}
+
+builder.Services.AddOptions<WebhookSettings>()
+    .Bind(builder.Configuration.GetSection(WebhookSettings.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+builder.Services.AddScoped<IWebhookDispatcher, WebhookDispatcher>();
+builder.Services.AddScoped<IWebhookSubscriptionService, WebhookSubscriptionService>();
+builder.Services.AddScoped<IWebhookDeliveryService, WebhookDeliveryService>();
+// The per-attempt timeout is applied by WebhookDeliveryService. Redirects are never followed, and the
+// connect callback re-checks resolved addresses against private ranges (DNS rebinding).
+builder.Services.AddHttpClient(WebhookDeliveryService.HttpClientName, client => client.Timeout = Timeout.InfiniteTimeSpan)
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        UseCookies = false,
+        ConnectCallback = SsrfGuard.ConnectAsync
+    });
+builder.Services.AddHostedService<WebhookDeliveryWorker>();
 
 // Background notifications (SDD §6)
 builder.Services.AddOptions<NotificationWorkerSettings>()

@@ -13,6 +13,12 @@ public interface IBillingService
 
     /// <summary>Billing state of a task the caller can see.</summary>
     Task<TaskBillingResponseDto> GetBillingStatusAsync(Guid currentUserId, string role, Guid taskId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// FR-PAY-03 / FR-HOOK-01: applies a verified provider event to the billing state machine. Replays, stale
+    /// sessions, unknown billings and unhandled event types are acknowledged without side effects.
+    /// </summary>
+    Task HandleWebhookEventAsync(PaymentWebhookEvent webhookEvent, CancellationToken cancellationToken = default);
 }
 
 /// <param name="Billing">The billing after the change.</param>

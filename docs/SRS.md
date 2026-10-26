@@ -86,11 +86,12 @@ This Software Requirements Specification defines the complete behavioral, operat
   | :--- | :--- | :--- |
   | `Unpaid` | `Processing` | Checkout session created (FR-PAY-02) |
   | `Failed` | `Processing` | New checkout session created after a failed payment |
-  | `Processing` | `Paid` | Verified `checkout.session.completed` with `payment_status = paid`, or `checkout.session.async_payment_succeeded`. Sets `PaidAtUtc` and `StripePaymentIntentId`. |
+  | `Processing` | `Paid` | Verified `checkout.session.completed` with `payment_status = paid`, `checkout.session.async_payment_succeeded`, or `payment_intent.succeeded`. Sets `PaidAtUtc` and `StripePaymentIntentId`. |
+  | `Failed` | `Paid` | Verified success event for the billing's **current** session (`TaskBilling.StripeSessionId`). A declined card moves the billing to `Failed`, but the payer can retry on the same Checkout page; the later success must still be recorded because Stripe has taken the payment. |
   | `Processing` | `Failed` | Verified `checkout.session.async_payment_failed` or `payment_intent.payment_failed` |
   | `Processing` | `Unpaid` | Verified `checkout.session.expired` |
 
-  `Paid` is terminal. Transitions out of `Processing` happen **only** through verified Stripe webhook events (FR-HOOK-01), never through client calls.
+  `Paid` is terminal. Transitions out of `Processing`, and `Failed` → `Paid`, happen **only** through verified Stripe webhook events (FR-HOOK-01), never through client calls.
 - **FR-PAY-04 (Idempotency):**
   - The checkout endpoint requires an `Idempotency-Key` request header (UUID). The system sends `checkout:{TaskBillingId}:{Idempotency-Key}` to Stripe as the request idempotency key, so a retried call with the same key never creates a second session.
   - If the billing is already `Processing` and its Stripe session is still open, the system returns that session instead of creating a new one. If Stripe reports the session as expired, the system first moves the billing to `Unpaid`, then creates a new session.

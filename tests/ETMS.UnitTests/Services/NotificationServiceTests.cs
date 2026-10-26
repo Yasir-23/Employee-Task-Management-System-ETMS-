@@ -14,7 +14,7 @@ public sealed class NotificationServiceTests : IDisposable
 
     public NotificationServiceTests()
     {
-        _service = new NotificationService(_ctx.Db, _email.Object);
+        _service = new NotificationService(_ctx.Db, _email.Object, _ctx.Webhooks);
     }
 
     public void Dispose() => _ctx.Dispose();
