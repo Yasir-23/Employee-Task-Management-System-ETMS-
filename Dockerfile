@@ -28,6 +28,10 @@ COPY --from=build /app/publish .
 # /app itself is root-owned; docker-compose mounts a named volume here, which inherits this ownership.
 RUN mkdir -p /app/App_Data/Uploads && chown -R $APP_UID /app/App_Data
 
+# Data Protection key ring (DataProtection__KeyRingPath). Same reasoning: the etms_dpkeys volume mounted here
+# takes this ownership on first use, so the non-root app user can write keys.
+RUN mkdir -p /var/dpkeys && chown $APP_UID /var/dpkeys && chmod 700 /var/dpkeys
+
 # Run as the image's built-in non-root user.
 USER $APP_UID
 

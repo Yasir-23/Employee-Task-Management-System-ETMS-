@@ -2,12 +2,14 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json.Serialization;
 using ETMS.Api.BackgroundWorkers;
+using ETMS.Api.Common.Extensions;
 using ETMS.Api.Common.Middleware;
 using ETMS.Api.Common.Settings;
 using ETMS.Api.Data;
 using ETMS.Api.Data.Interceptors;
 using ETMS.Api.Services.Implementations;
 using ETMS.Api.Services.Billing;
+using ETMS.Api.Services.Caching;
 using ETMS.Api.Services.Interfaces;
 using ETMS.Api.Services.Pdf;
 using ETMS.Api.Services.Storage;
@@ -18,6 +20,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -71,7 +74,40 @@ builder.Services.AddScoped<IEmployeeService, EmployeeService>();
 builder.Services.AddScoped<ITaskService, TaskService>();
 builder.Services.AddScoped<IEmailService, LoggingEmailService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
-builder.Services.AddScoped<IReportService, ReportService>();
+
+// Analytics cache (SDD §12.2): Redis when configured, otherwise an in-process cache. ReportCache is fail-open,
+// so an unreachable Redis only costs the cache, never the request.
+var redisConnectionString = builder.Configuration.GetConnectionString("Redis");
+var useRedis = !string.IsNullOrWhiteSpace(redisConnectionString);
+if (useRedis)
+{
+    builder.Services.AddStackExchangeRedisCache(options =>
+    {
+        var redis = ConfigurationOptions.Parse(redisConnectionString!);
+        // Start even when Redis is down, and fail cache calls fast so they fall through to PostgreSQL.
+        redis.AbortOnConnectFail = false;
+        redis.ConnectTimeout = 1000;
+        redis.SyncTimeout = 250;
+        redis.AsyncTimeout = 250;
+        options.ConfigurationOptions = redis;
+        options.InstanceName = "etms:";
+    });
+}
+else
+{
+    builder.Services.AddDistributedMemoryCache();
+}
+
+builder.Services.AddOptions<CacheSettings>()
+    .Bind(builder.Configuration.GetSection(CacheSettings.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+builder.Services.AddSingleton<ReportCache>();
+builder.Services.AddSingleton<IReportCacheInvalidator>(serviceProvider => serviceProvider.GetRequiredService<ReportCache>());
+builder.Services.AddScoped<ReportService>();
+builder.Services.AddScoped<IReportService>(serviceProvider => new CachedReportService(
+    serviceProvider.GetRequiredService<ReportService>(),
+    serviceProvider.GetRequiredService<ReportCache>()));
 
 // Attachments & PDF reporting (SDD §7, §8)
 builder.Services.AddOptions<StorageSettings>()
@@ -99,24 +135,29 @@ if (!builder.Environment.IsProduction()
     throw new InvalidOperationException("A live Stripe key is configured outside Production. Use a sk_test_ key.");
 }
 
-builder.Services.AddHttpClient("Stripe");
-// Stripe.net retries transient failures itself, reusing the request's idempotency key.
+// Outbound HttpClients (Stripe, webhooks) with Polly v8 pipelines (SDD §12.1).
+builder.Services.AddHttpResilience();
+
+// Retries come from the Polly pipeline only, so Stripe.net's own retries are off (no multiplied attempts).
 // Fully qualified: the Stripe namespace also defines BillingService, TokenService and File.
 builder.Services.AddScoped<Stripe.IStripeClient>(serviceProvider => new Stripe.StripeClient(
     apiKey: serviceProvider.GetRequiredService<IOptions<StripeSettings>>().Value.ApiKey,
     httpClient: new Stripe.SystemNetHttpClient(
-        serviceProvider.GetRequiredService<IHttpClientFactory>().CreateClient("Stripe"),
-        maxNetworkRetries: 2)));
+        serviceProvider.GetRequiredService<IHttpClientFactory>().CreateClient(StripePaymentGatewayService.HttpClientName),
+        maxNetworkRetries: 0)));
 builder.Services.AddScoped<IPaymentGatewayService, StripePaymentGatewayService>();
 builder.Services.AddScoped<IBillingService, BillingService>();
 
-// Webhooks (SDD §10). Subscription secrets are encrypted with Data Protection; the key ring must be
-// persisted (DataProtection:KeyRingPath on a volume) or secrets become unreadable after a restart.
-var dataProtection = builder.Services.AddDataProtection().SetApplicationName("ETMS");
-if (builder.Configuration["DataProtection:KeyRingPath"] is { Length: > 0 } keyRingPath)
-{
-    dataProtection.PersistKeysToFileSystem(new DirectoryInfo(keyRingPath));
-}
+// Webhook secrets are encrypted with Data Protection. The key ring is persisted (a Docker volume in compose)
+// so the secrets stay decryptable across restarts; a relative path is resolved against the content root.
+var keyRingPath = Path.GetFullPath(Path.Combine(
+    builder.Environment.ContentRootPath,
+    builder.Configuration["DataProtection:KeyRingPath"] is { Length: > 0 } configuredKeyRingPath
+        ? configuredKeyRingPath
+        : Path.Combine("App_Data", "DataProtection-Keys")));
+builder.Services.AddDataProtection()
+    .SetApplicationName("ETMS")
+    .PersistKeysToFileSystem(new DirectoryInfo(keyRingPath));
 
 builder.Services.AddOptions<WebhookSettings>()
     .Bind(builder.Configuration.GetSection(WebhookSettings.SectionName))
@@ -125,15 +166,6 @@ builder.Services.AddOptions<WebhookSettings>()
 builder.Services.AddScoped<IWebhookDispatcher, WebhookDispatcher>();
 builder.Services.AddScoped<IWebhookSubscriptionService, WebhookSubscriptionService>();
 builder.Services.AddScoped<IWebhookDeliveryService, WebhookDeliveryService>();
-// The per-attempt timeout is applied by WebhookDeliveryService. Redirects are never followed, and the
-// connect callback re-checks resolved addresses against private ranges (DNS rebinding).
-builder.Services.AddHttpClient(WebhookDeliveryService.HttpClientName, client => client.Timeout = Timeout.InfiniteTimeSpan)
-    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
-    {
-        AllowAutoRedirect = false,
-        UseCookies = false,
-        ConnectCallback = SsrfGuard.ConnectAsync
-    });
 builder.Services.AddHostedService<WebhookDeliveryWorker>();
 
 // Background notifications (SDD §6)
@@ -189,6 +221,11 @@ builder.Services.AddSwaggerGen(options =>
 
 var app = builder.Build();
 
+if (!useRedis)
+{
+    app.Logger.LogWarning("ConnectionStrings:Redis is not set; analytics are cached in process memory only.");
+}
+
 app.UseMiddleware<GlobalExceptionMiddleware>();
 
 // Turns empty 401/403/404 responses (e.g. from the JWT handler) into ProblemDetails bodies.
@@ -197,7 +234,10 @@ app.UseStatusCodePages();
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
-    app.UseSwaggerUI();
+    app.UseSwaggerUI(options =>
+    {
+        options.DisplayRequestDuration();
+    });
 }
 
 // Redirect to HTTPS outside Development, or in Development only when an HTTPS endpoint is bound.

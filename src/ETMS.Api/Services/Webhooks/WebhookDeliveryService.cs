@@ -1,11 +1,14 @@
 using System.Security.Cryptography;
 using System.Text;
+using ETMS.Api.Common.Extensions;
 using ETMS.Api.Common.Settings;
 using ETMS.Api.Data;
 using ETMS.Api.Models.Entities;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Polly;
+using Polly.CircuitBreaker;
 
 namespace ETMS.Api.Services.Webhooks;
 
@@ -52,7 +55,18 @@ public class WebhookDeliveryService : IWebhookDeliveryService
         var client = _httpClientFactory.CreateClient(HttpClientName);
         foreach (var delivery in deliveries)
         {
-            var statusCode = await SendAsync(client, delivery, cancellationToken);
+            int? statusCode;
+            try
+            {
+                statusCode = await SendAsync(client, delivery, cancellationToken);
+            }
+            catch (BrokenCircuitException)
+            {
+                // FR-RESIL-01: the receiver's circuit is open. Postpone without consuming an attempt.
+                delivery.NextRetryUtc = DateTime.UtcNow + HttpResilienceExtensions.CircuitBreakDuration;
+                await _db.SaveChangesAsync(cancellationToken);
+                continue;
+            }
 
             var deadLettered = WebhookRetryPolicy.RecordAttempt(delivery, statusCode, DateTime.UtcNow, _settings.MaxAttempts);
             if (deadLettered)
@@ -149,15 +163,15 @@ public class WebhookDeliveryService : IWebhookDeliveryService
         request.Headers.Add(WebhookSigner.SignatureHeader,
             WebhookSigner.BuildHeader(secret, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), delivery.Payload));
 
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(_settings.RequestTimeoutSeconds));
-
+        // Per-attempt/total timeouts and inner retries come from the "OutboundWebhooks" Polly pipeline (SDD §12.1).
         try
         {
-            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             return (int)response.StatusCode;
         }
-        catch (Exception ex) when (ex is HttpRequestException || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
+        catch (Exception ex) when (ex is HttpRequestException
+            || (ex is ExecutionRejectedException and not BrokenCircuitException)
+            || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
         {
             _logger.LogInformation("Webhook delivery {DeliveryId} to subscription {SubscriptionId} failed: {Error}",
                 delivery.Id, delivery.SubscriptionId, ex.Message);

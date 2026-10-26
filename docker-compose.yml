@@ -17,6 +17,19 @@ services:
       timeout: 5s
       retries: 5
 
+  # Analytics cache (SDD §12.2). The API is fail-open, so a Redis outage only disables caching.
+  redis:
+    image: redis:7-alpine
+    container_name: etms_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   api:
     build:
       context: .
@@ -26,17 +39,24 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       # Development enables Swagger and seeds the demo Manager/Employee accounts.
       # Use Production (and real secrets via JwtSettings__Secret etc.) outside local use.
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__DefaultConnection: "Host=db;Port=5432;Database=etms_db;Username=postgres;Password=postgrespassword"
+      ConnectionStrings__Redis: "redis:6379"
+      DataProtection__KeyRingPath: /var/dpkeys
     ports:
       - "5000:8080"
     volumes:
       # Task attachments (SDD §7.2) survive container rebuilds.
       - etms_attachments:/app/App_Data/Uploads
+      # Data Protection key ring: keeps encrypted webhook secrets decryptable across restarts and rebuilds.
+      - etms_dpkeys:/var/dpkeys
 
 volumes:
   etms_postgres_data:
   etms_attachments:
+  etms_dpkeys:

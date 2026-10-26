@@ -7,6 +7,7 @@ using ETMS.Api.DTOs.Requests;
 using ETMS.Api.DTOs.Responses;
 using ETMS.Api.Models.Entities;
 using ETMS.Api.Models.Enums;
+using ETMS.Api.Services.Caching;
 using ETMS.Api.Services.Interfaces;
 using ETMS.Api.Services.Webhooks;
 using Microsoft.EntityFrameworkCore;
@@ -21,13 +22,20 @@ public class TaskService : ITaskService
     private readonly AppDbContext _db;
     private readonly IEmailService _emailService;
     private readonly IWebhookDispatcher _webhooks;
+    private readonly IReportCacheInvalidator _reportCache;
     private readonly ILogger<TaskService> _logger;
 
-    public TaskService(AppDbContext db, IEmailService emailService, IWebhookDispatcher webhooks, ILogger<TaskService> logger)
+    public TaskService(
+        AppDbContext db,
+        IEmailService emailService,
+        IWebhookDispatcher webhooks,
+        IReportCacheInvalidator reportCache,
+        ILogger<TaskService> logger)
     {
         _db = db;
         _emailService = emailService;
         _webhooks = webhooks;
+        _reportCache = reportCache;
         _logger = logger;
     }
 
@@ -68,6 +76,7 @@ public class TaskService : ITaskService
             task.Id, task.Title, task.Priority, task.Status, task.DueDateUtc, task.AssigneeId, creatorUserId), cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
         await CommitAsync(transaction, cancellationToken);
+        await _reportCache.InvalidateAsync(cancellationToken);
 
         var created = await GetProjectedAsync(task.Id, cancellationToken);
         await NotifyAssigneeAsync(assignee, created, isReassignment: false, cancellationToken);
@@ -239,6 +248,7 @@ public class TaskService : ITaskService
         }
 
         await _db.SaveChangesAsync(cancellationToken);
+        await _reportCache.InvalidateAsync(cancellationToken);
 
         return await GetProjectedAsync(task.Id, cancellationToken);
     }
@@ -285,6 +295,7 @@ public class TaskService : ITaskService
             new TaskReassignedEventData(task.Id, previousAssigneeId, newAssigneeId, currentManagerId), cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
         await CommitAsync(transaction, cancellationToken);
+        await _reportCache.InvalidateAsync(cancellationToken);
 
         var reassigned = await GetProjectedAsync(task.Id, cancellationToken);
         await NotifyAssigneeAsync(newAssignee, reassigned, isReassignment: true, cancellationToken);

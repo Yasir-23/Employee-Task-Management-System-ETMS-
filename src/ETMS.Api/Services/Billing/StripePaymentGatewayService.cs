@@ -1,7 +1,10 @@
 using ETMS.Api.Common.Exceptions;
+using ETMS.Api.Common.Extensions;
 using ETMS.Api.Common.Settings;
 using ETMS.Api.Models.Entities;
 using Microsoft.Extensions.Options;
+using Polly.CircuitBreaker;
+using Polly.Timeout;
 using Stripe;
 using Stripe.Checkout;
 
@@ -13,6 +16,9 @@ namespace ETMS.Api.Services.Billing;
 /// </summary>
 public class StripePaymentGatewayService : IPaymentGatewayService
 {
+    /// <summary>Named HttpClient carrying the Polly pipeline (SDD §12.1).</summary>
+    public const string HttpClientName = "Stripe";
+
     private const int MaxProductNameLength = 250;
     private const string TaskIdMetadataKey = "TaskId";
     private const string BillingIdMetadataKey = "BillingId";
@@ -150,6 +156,10 @@ public class StripePaymentGatewayService : IPaymentGatewayService
             _logger.LogError(ex, "Stripe rejected checkout creation for billing {BillingId}: {StripeError}.", billing.Id, ex.StripeError?.Type);
             throw new BadGatewayException("The payment provider could not create a checkout session. Please try again later.");
         }
+        catch (Exception ex) when (IsTransportFailure(ex))
+        {
+            throw MapTransportFailure(ex, $"checkout creation for billing {billing.Id}");
+        }
     }
 
     public async Task<CheckoutSessionResult> GetCheckoutSessionAsync(string sessionId, CancellationToken ct = default)
@@ -163,6 +173,28 @@ public class StripePaymentGatewayService : IPaymentGatewayService
             _logger.LogError(ex, "Stripe lookup of checkout session {SessionId} failed: {StripeError}.", sessionId, ex.StripeError?.Type);
             throw new BadGatewayException("The payment provider could not be reached. Please try again later.");
         }
+        catch (Exception ex) when (IsTransportFailure(ex))
+        {
+            throw MapTransportFailure(ex, $"lookup of checkout session {sessionId}");
+        }
+    }
+
+    // Failures raised by the HttpClient pipeline rather than by Stripe (SDD §12.1 failure table).
+    private static bool IsTransportFailure(Exception ex) =>
+        ex is BrokenCircuitException or TimeoutRejectedException or HttpRequestException;
+
+    private AppException MapTransportFailure(Exception ex, string operation)
+    {
+        if (ex is BrokenCircuitException)
+        {
+            // Fail fast while Stripe is considered down; the client may retry once the circuit half-opens.
+            _logger.LogWarning("Stripe circuit is open; rejected {Operation}.", operation);
+            return new ServiceUnavailableException("The payment provider is temporarily unavailable. Please try again shortly.",
+                HttpResilienceExtensions.CircuitBreakDuration);
+        }
+
+        _logger.LogError(ex, "Stripe {Operation} failed after retries.", operation);
+        return new BadGatewayException("The payment provider could not be reached. Please try again later.");
     }
 
     private static CheckoutSessionResult Map(Session session) => new(

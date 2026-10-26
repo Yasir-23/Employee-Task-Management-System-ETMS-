@@ -76,6 +76,11 @@ public class GlobalExceptionMiddleware
             }
 
             context.Response.StatusCode = problem.Status.Value;
+            if (ex is ServiceUnavailableException unavailable)
+            {
+                context.Response.Headers.RetryAfter = ((int)Math.Ceiling(unavailable.RetryAfter.TotalSeconds)).ToString();
+            }
+
             await problemDetailsService.WriteAsync(new ProblemDetailsContext
             {
                 HttpContext = context,

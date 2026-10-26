@@ -19,8 +19,4 @@ public class WebhookSettings
 
     [Range(1, 500)]
     public int BatchSize { get; init; } = 50;
-
-    /// <summary>API.md §8.5: receivers must answer within 10 seconds.</summary>
-    [Range(1, 60)]
-    public int RequestTimeoutSeconds { get; init; } = 10;
 }

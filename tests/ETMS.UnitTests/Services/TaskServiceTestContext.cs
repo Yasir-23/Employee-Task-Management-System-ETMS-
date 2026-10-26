@@ -1,13 +1,18 @@
+using ETMS.Api.Common.Settings;
 using ETMS.Api.Data;
 using ETMS.Api.Data.Interceptors;
 using ETMS.Api.DTOs.Requests;
 using ETMS.Api.Models.Entities;
 using ETMS.Api.Models.Enums;
+using ETMS.Api.Services.Caching;
 using ETMS.Api.Services.Implementations;
 using ETMS.Api.Services.Interfaces;
 using ETMS.Api.Services.Webhooks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 
 namespace ETMS.UnitTests.Services;
@@ -30,7 +35,8 @@ internal sealed class TaskServiceTestContext : IDisposable
 
         Db = new AppDbContext(options);
         Webhooks = new WebhookDispatcher(Db);
-        Service = new TaskService(Db, Email.Object, Webhooks, NullLogger<TaskService>.Instance);
+        ReportCache = new ReportCache(Cache, Options.Create(new CacheSettings()), NullLogger<ReportCache>.Instance);
+        Service = new TaskService(Db, Email.Object, Webhooks, ReportCache, NullLogger<TaskService>.Instance);
 
         var department = new Department { Id = Guid.NewGuid(), Name = "Engineering", CreatedAtUtc = DateTime.UtcNow };
         Db.Departments.Add(department);
@@ -53,6 +59,12 @@ internal sealed class TaskServiceTestContext : IDisposable
 
     /// <summary>Real outbox dispatcher used by <see cref="Service"/> (FR-HOOK-03).</summary>
     public WebhookDispatcher Webhooks { get; }
+
+    /// <summary>In-process stand-in for Redis behind <see cref="ReportCache"/>.</summary>
+    public IDistributedCache Cache { get; } = new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
+
+    /// <summary>Analytics cache that <see cref="Service"/> invalidates on every task change (FR-RESIL-02).</summary>
+    public ReportCache ReportCache { get; }
 
     /// <summary>Email sink used by <see cref="Service"/> for assignment notifications (FR-NOTIF-01).</summary>
     public Mock<IEmailService> Email { get; } = new();
