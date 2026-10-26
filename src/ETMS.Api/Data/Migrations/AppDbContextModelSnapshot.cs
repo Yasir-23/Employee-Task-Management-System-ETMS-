@@ -191,6 +191,69 @@ namespace ETMS.Api.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ETMS.Api.Models.Entities.TaskBilling", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("AmountCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(3)
+                        .HasColumnType("character(3)")
+                        .HasDefaultValue("usd")
+                        .IsFixedLength();
+
+                    b.Property<DateTime?>("PaidAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("StripePaymentIntentId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("StripeSessionId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StripeSessionId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_TaskBillings_StripeSessionId")
+                        .HasFilter("\"StripeSessionId\" IS NOT NULL");
+
+                    b.HasIndex("TaskId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_TaskBillings_TaskId");
+
+                    b.ToTable("TaskBillings", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_TaskBillings_AmountCents", "\"AmountCents\" BETWEEN 50 AND 99999999");
+                        });
+                });
+
             modelBuilder.Entity("ETMS.Api.Models.Entities.TaskItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -364,6 +427,17 @@ namespace ETMS.Api.Data.Migrations
                     b.Navigation("UploadedByUser");
                 });
 
+            modelBuilder.Entity("ETMS.Api.Models.Entities.TaskBilling", b =>
+                {
+                    b.HasOne("ETMS.Api.Models.Entities.TaskItem", "Task")
+                        .WithOne("Billing")
+                        .HasForeignKey("ETMS.Api.Models.Entities.TaskBilling", "TaskId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Task");
+                });
+
             modelBuilder.Entity("ETMS.Api.Models.Entities.TaskItem", b =>
                 {
                     b.HasOne("ETMS.Api.Models.Entities.User", "Assignee")
@@ -409,6 +483,8 @@ namespace ETMS.Api.Data.Migrations
                     b.Navigation("Attachments");
 
                     b.Navigation("AuditLogs");
+
+                    b.Navigation("Billing");
 
                     b.Navigation("Comments");
                 });

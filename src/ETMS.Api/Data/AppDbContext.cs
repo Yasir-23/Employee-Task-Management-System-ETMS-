@@ -16,6 +16,7 @@ public class AppDbContext : DbContext
     public DbSet<Comment> Comments => Set<Comment>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<TaskAttachment> TaskAttachments => Set<TaskAttachment>();
+    public DbSet<TaskBilling> TaskBillings => Set<TaskBilling>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -172,6 +173,37 @@ public class AppDbContext : DbContext
             entity.HasOne(a => a.UploadedByUser)
                 .WithMany()
                 .HasForeignKey(a => a.UploadedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // SDD §3.8
+        modelBuilder.Entity<TaskBilling>(entity =>
+        {
+            entity.ToTable("TaskBillings", t => t.HasCheckConstraint(
+                "CK_TaskBillings_AmountCents", "\"AmountCents\" BETWEEN 50 AND 99999999"));
+            entity.HasKey(b => b.Id);
+
+            entity.Property(b => b.AmountCents).IsRequired();
+            entity.Property(b => b.Currency).HasMaxLength(3).IsFixedLength().IsRequired().HasDefaultValue("usd");
+            entity.Property(b => b.Status).HasConversion<int>().IsRequired();
+            entity.Property(b => b.StripePaymentIntentId).HasMaxLength(255);
+            entity.Property(b => b.StripeSessionId).HasMaxLength(255);
+            entity.Property(b => b.CreatedAtUtc).IsRequired();
+
+            // FR-PAY-04: maps to PostgreSQL's xmin system column (no physical column), so concurrent
+            // checkouts on the same billing fail with DbUpdateConcurrencyException instead of both winning.
+            entity.Property<uint>("Version").IsRowVersion();
+
+            entity.HasIndex(b => b.TaskId).IsUnique().HasDatabaseName("UX_TaskBillings_TaskId");
+            entity.HasIndex(b => b.StripeSessionId)
+                .IsUnique()
+                .HasFilter("\"StripeSessionId\" IS NOT NULL")
+                .HasDatabaseName("UX_TaskBillings_StripeSessionId");
+
+            // Financial records are never cascade-deleted with their task.
+            entity.HasOne(b => b.Task)
+                .WithOne(t => t.Billing)
+                .HasForeignKey<TaskBilling>(b => b.TaskId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }

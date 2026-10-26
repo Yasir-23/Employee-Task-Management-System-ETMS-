@@ -23,4 +23,5 @@ public class TaskItem
     public ICollection<Comment> Comments { get; set; } = new List<Comment>();
     public ICollection<AuditLog> AuditLogs { get; set; } = new List<AuditLog>();
     public ICollection<TaskAttachment> Attachments { get; set; } = new List<TaskAttachment>();
+    public TaskBilling? Billing { get; set; }
 }

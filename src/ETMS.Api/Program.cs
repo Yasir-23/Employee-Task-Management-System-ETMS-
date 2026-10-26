@@ -7,11 +7,13 @@ using ETMS.Api.Common.Settings;
 using ETMS.Api.Data;
 using ETMS.Api.Data.Interceptors;
 using ETMS.Api.Services.Implementations;
+using ETMS.Api.Services.Billing;
 using ETMS.Api.Services.Interfaces;
 using ETMS.Api.Services.Pdf;
 using ETMS.Api.Services.Storage;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 
@@ -80,6 +82,31 @@ builder.Services.AddScoped<IReportPdfService, ReportPdfService>();
 
 // The Community license applies only below QuestPDF's revenue threshold; confirm eligibility before production.
 QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
+
+// Billing via Stripe (SDD §9)
+var stripeSection = builder.Configuration.GetSection(StripeSettings.SectionName);
+builder.Services.AddOptions<StripeSettings>()
+    .Bind(stripeSection)
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
+// SDD §9.2: never charge real cards from a non-production environment.
+if (!builder.Environment.IsProduction()
+    && stripeSection[nameof(StripeSettings.ApiKey)]?.StartsWith("sk_live_", StringComparison.Ordinal) == true)
+{
+    throw new InvalidOperationException("A live Stripe key is configured outside Production. Use a sk_test_ key.");
+}
+
+builder.Services.AddHttpClient("Stripe");
+// Stripe.net retries transient failures itself, reusing the request's idempotency key.
+// Fully qualified: the Stripe namespace also defines BillingService, TokenService and File.
+builder.Services.AddScoped<Stripe.IStripeClient>(serviceProvider => new Stripe.StripeClient(
+    apiKey: serviceProvider.GetRequiredService<IOptions<StripeSettings>>().Value.ApiKey,
+    httpClient: new Stripe.SystemNetHttpClient(
+        serviceProvider.GetRequiredService<IHttpClientFactory>().CreateClient("Stripe"),
+        maxNetworkRetries: 2)));
+builder.Services.AddScoped<IPaymentGatewayService, StripePaymentGatewayService>();
+builder.Services.AddScoped<IBillingService, BillingService>();
 
 // Background notifications (SDD §6)
 builder.Services.AddOptions<NotificationWorkerSettings>()
